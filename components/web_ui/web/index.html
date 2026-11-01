@@ -374,6 +374,9 @@ function setMode(m) {
   $('modeClip').classList.toggle('on', !live);
   $('pbBar').style.display = live ? 'none' : 'block';
   $('pbTag').style.display = live ? 'none' : 'block';
+  /* 回放界面不显示录制按钮与其进度条：录制只能在预览模式下进行 */
+  $('rec').style.display = live ? '' : 'none';
+  $('bar').style.display = live ? '' : 'none';
   if (live) {
     $('pbTag').textContent = '';
     /* 离开回放模式就释放片段缓冲（最大 675 KB）；再进回放会重新拉取 */
