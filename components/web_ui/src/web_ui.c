@@ -171,6 +171,17 @@ static esp_err_t h_status(httpd_req_t *req)
                             heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     cJSON_AddNumberToObject(root, "uptime_ms", now_ms());
 
+    /* 当前 httpd 连接数 / 上限：用于诊断"连接池被占满导致帧率塌陷" */
+    {
+        size_t nfds = 16;          /* 必须 >= 容量，函数会回填实际数量 */
+        int fds[16];
+        esp_err_t e = httpd_get_client_list(req->handle, &nfds, fds);
+        cJSON *net = cJSON_CreateObject();
+        cJSON_AddNumberToObject(net, "open", e == ESP_OK ? (int)nfds : -1);
+        cJSON_AddNumberToObject(net, "max", 9);
+        cJSON_AddItemToObject(root, "net", net);
+    }
+
     char *out = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
     esp_err_t err = httpd_resp_sendstr(req, out ? out : "{}");
@@ -336,6 +347,7 @@ static esp_err_t h_clip_last(httpd_req_t *req)
     }
 
     httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Connection", "close");
     char hdr[8];
     hdr[0] = n & 0xFF; hdr[1] = (n >> 8) & 0xFF;
     hdr[2] = 25; hdr[3] = 0;
@@ -473,6 +485,7 @@ static esp_err_t h_group(httpd_req_t *req)
         if (!rbuf) rbuf = heap_caps_malloc(16384, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         if (!rbuf) { fclose(f); return ESP_FAIL; }
         httpd_resp_set_type(req, "application/octet-stream");
+        httpd_resp_set_hdr(req, "Connection", "close");
         size_t got;
         while ((got = fread(rbuf, 1, 16384, f)) > 0) {
             if (httpd_resp_send_chunk(req, (const char *)rbuf, got) != ESP_OK) break;
@@ -499,6 +512,7 @@ static esp_err_t h_group(httpd_req_t *req)
     }
 
     httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Connection", "close");
     uint8_t oh[8] = { (uint8_t)(n & 0xFF), (uint8_t)(n >> 8), 25, 0, 0, 0, 0, 0 };
     esp_err_t err = httpd_resp_send_chunk(req, (const char *)oh, 8);
     if (err != ESP_OK) { fclose(f); return err; }
@@ -653,7 +667,7 @@ esp_err_t web_ui_start(void)
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.server_port = 80;
-    cfg.max_open_sockets = 4;
+    cfg.max_open_sockets = 9;   /* 上限 = LWIP_MAX_SOCKETS - 3（httpd 内部占 3 个）；8 会直接启动失败 */
     cfg.max_uri_handlers = 16;   /* 默认只有 8，路由已到 12 个 */
     cfg.lru_purge_enable = true;
     cfg.stack_size = 8192;

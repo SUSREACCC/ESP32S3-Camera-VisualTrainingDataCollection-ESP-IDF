@@ -45,6 +45,18 @@ CONFIG_CAMERA_PSRAM_DMA=y
 
 # ---- 网络 ----
 #
+# TCP 发送缓冲：默认 5760 B 只有 4×MSS，在 RTT 抖动（实测 5~150 ms）的 WiFi 上
+# 一帧 9 KB 要跑 2 个往返，691 KB 的片段回放要 16 秒，且期间 httpd 单任务被独占，
+# 预览帧率会塌陷。放大到 16 KB 后 691 KB 约 4 秒发完。
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384
+#
+# 套接字数：httpd 的 max_open_sockets 上限 = LWIP_MAX_SOCKETS - 3（内部占 3 个）。
+# 默认 10 只能开 7 个，而浏览器每主机默认就 6 条连接，回放后会触顶触发 LRU 强杀。
+# 调到 12 以允许 httpd 使用 9 个。
+CONFIG_LWIP_MAX_SOCKETS=12
+#
+
+#
 # HTTP 请求头缓冲：默认只有 512 B，手机浏览器（User-Agent + sec-ch-ua + cookies）
 # 随手就超过，表现为 **HTTP 431 "Header fields are too long"**、页面打不开。
 # 该缓冲在"每次请求"的 aux 结构里，不是常驻，加大几乎无代价。

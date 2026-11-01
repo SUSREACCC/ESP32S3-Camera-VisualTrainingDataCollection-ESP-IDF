@@ -23,6 +23,11 @@
   /* 40% 参考框：手高须超出它；动态位移须至少跨过它的边长 */
   #box40 { position:absolute; left:30%; top:30%; width:40%; height:40%;
            border:1px dashed rgba(230,126,34,.8); border-radius:4px; }
+  #modeLive, #modeClip { font-size:13px; padding:9px 8px; }
+  #modeLive.on, #modeClip.on { background:#1f6feb; border-color:#1f6feb; color:#fff; }
+  #pbTag { position:absolute; left:6px; top:6px; display:none;
+           font-size:10px; padding:2px 6px; border-radius:4px;
+           background:rgba(192,57,43,.85); color:#fff; letter-spacing:.5px; }
   #box40::after { content:"40%"; position:absolute; right:-2px; top:-13px;
            font-size:9px; color:rgba(230,126,34,.95); letter-spacing:.5px; }
   .row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
@@ -49,13 +54,28 @@
 <h1>视觉采集终端</h1>
 
 <div class="card">
+  <div class="row" style="margin-bottom:6px">
+    <div style="flex:1 1 45%"><button id="modeLive" class="on">◉ 预览</button></div>
+    <div style="flex:1 1 45%"><button id="modeClip">▣ 回放</button></div>
+  </div>
   <div id="stage">
     <canvas id="cv" width="96" height="96"></canvas>
     <div id="overlay"><div id="safe"></div><div id="box40"></div></div>
+    <div id="pbTag">回放中</div>
   </div>
   <div class="stat" style="margin-top:8px">
     <span id="stPreview">预览 —</span>
     <span id="stWifi">WiFi —</span>
+  </div>
+  <button id="rec" style="margin-top:8px">● 录制</button>
+  <div id="bar"><div id="barIn"></div></div>
+  <div class="stat" style="margin-top:6px"><span id="stRec">就绪</span><span id="stGroups">—</span></div>
+  <div id="pbBar" style="display:none;margin-top:6px">
+    <input type="range" id="slider" min="0" max="0" value="0">
+    <div class="stat" style="margin-top:4px">
+      <span id="pbInfo"></span>
+      <button id="btnPlay" style="width:auto;padding:6px 12px;font-size:12px">▶ 重播</button>
+    </div>
   </div>
 </div>
 
@@ -76,17 +96,8 @@
       <div class="hint" id="framesHint">≈ 675 KB/段</div>
     </div>
   </div>
-  <button id="rec">● 录制</button>
-  <div id="bar"><div id="barIn"></div></div>
-  <div class="stat" style="margin-top:6px"><span id="stRec">就绪</span><span id="stGroups">—</span></div>
 </div>
 
-<div class="card" id="pb">
-  <div class="stat"><span>回放</span><span id="pbInfo"></span></div>
-  <canvas id="pbcv" width="96" height="96" style="width:100%;max-width:384px;image-rendering:pixelated;display:block;margin:8px auto;border-radius:8px;background:#000"></canvas>
-  <input type="range" id="slider" min="0" max="0" value="0">
-  <button id="btnPlay" style="margin-top:8px">▶ 重播</button>
-</div>
 
 <div class="card">
   <div class="stat" style="margin-bottom:6px">
@@ -121,7 +132,40 @@ let CFG = null;
 let previewOn = true, running = true, recording = false;
 let frames = 0, fpsWindow = [], fpsShown = 0;
 const PV_WORKERS = 2;
+let pvPaused = false;   /* 回放期间暂停预览，避免与单任务 httpd 抢通道 */
+let hidden = false;     /* 页面是否在后台：后台时一个请求都不发 */
+let pvGen = 0;          /* 代次令牌：切模式时 +1，让所有在途响应作废 */
+const pvInflight = new Set();
+
+/* 切换画面来源时调用：作废并中断所有正在飞的预览请求，
+   否则它们返回后仍会绘制，造成"回放画面里闪预览帧" */
+function abortPreviewInflight() {
+  pvGen++;
+  for (const ac of pvInflight) { try { ac.abort(); } catch (e) {} }
+  pvInflight.clear();
+}
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* 页面进入后台：中断在途请求、停掉回放，避免继续占设备带宽与 httpd 套接字 */
+function onHidden() {
+  hidden = true;
+  abortPreviewInflight();
+  playing = false;
+}
+function onVisible() {
+  hidden = false;
+  abortPreviewInflight();          /* 作废后台期间可能残留的响应 */
+  if (mode === 'playback' && clipBuf) {
+    showClipFrame(Math.min(+$('slider').value || 0, clipN - 1));
+  }
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) onHidden(); else onVisible();
+  });
+}
+window.addEventListener('pagehide', onHidden);
+window.addEventListener('pageshow', (e) => { if (e.persisted) onVisible(); });
 
 function lsKey(suffix) { return 'gesture.' + (CFG ? CFG.cfg_crc : 'nocfg') + '.' + suffix; }
 
@@ -205,20 +249,38 @@ function updateFramesHint() {
 $('type').onchange = () => { if (CFG) localStorage.setItem(lsKey('type'), $('type').value); };
 $('frames').onchange = updateFramesHint;
 
+/* 单帧请求超时：设备 httpd 是单任务，回放会独占它；
+   没有超时的话一个挂住的请求会永久占住 worker（之前"回放后帧率塌陷"的主因之一） */
+const PV_TIMEOUT = 1200;
+
 async function previewWorker() {
   while (running) {
-    if (!previewOn) { await sleep(300); continue; }
+    /* 后台标签：完全不发请求（浏览器会把 timer 节流，但请求照发，白白占设备带宽） */
+    if (hidden) { await sleep(500); continue; }
+    if (pvPaused || !previewOn) { await sleep(200); continue; }
     const t0 = performance.now();
+    const gen = pvGen;
+    const ac = new AbortController();
+    pvInflight.add(ac);
+    const tm = setTimeout(() => { try { ac.abort(); } catch (e) {} }, PV_TIMEOUT);
     try {
-      const r = await fetch('/api/frame', { cache: 'no-store' });
+      const r = await fetch('/api/frame', { cache: 'no-store', signal: ac.signal });
       if (r.status === 204) { previewOn = false; await sleep(300); continue; }
       if (!r.ok) throw new Error(r.status);
       const ab = await r.arrayBuffer();
+      /* 关键：请求回来时可能已经切到回放模式（甚至换了另一段片段），
+         这种过期帧必须丢弃，否则会画到回放画面上造成闪动 */
+      if (gen !== pvGen || pvPaused) continue;
       if (ab.byteLength >= 8 + 9216) {
         drawGray(new Uint8Array(ab, 8, 9216), ctx, img);
         frames++;
       }
-    } catch (e) { await sleep(400); }
+    } catch (e) {
+      await sleep(200);
+    } finally {
+      clearTimeout(tm);
+      pvInflight.delete(ac);
+    }
     const dt = performance.now() - t0;
     await sleep(Math.max(0, 140 - dt));
   }
@@ -241,6 +303,7 @@ setInterval(() => {
 
 async function statusLoop() {
   while (running) {
+    if (hidden) { await sleep(2000); continue; }   /* 后台只保留低频心跳 */
     try {
       const s = await (await fetch('/api/status', { cache: 'no-store' })).json();
       $('stWifi').textContent = s.wifi.connected
@@ -263,7 +326,8 @@ async function statusLoop() {
             ? ('\u5df2\u4fdd\u5b58 ' + s.rec.last + ' (' + s.rec.last_frames + ' \u5e27)')
             : '\u5f55\u5236\u5931\u8d25';
           setTimeout(() => { $('barIn').style.width = '0'; }, 1200);
-          if (s.rec.state === 'idle') loadClip();
+          /* 录完不自动跳回放：保持预览，由用户自己点「回放」查看 */
+          if (mode !== 'preview') setMode('preview');
           previewOn = true;
         }
       }
@@ -278,6 +342,7 @@ $('rec').onclick = async () => {
     return el ? +el.value : 0;
   });
   const body = { label: $('type').value, frames: +$('frames').value, vars: vars };
+  if (mode !== 'preview') setMode('preview');   /* 录制必须在预览模式下进行 */
   $('rec').disabled = true;
   previewOn = false;
   try {
@@ -294,46 +359,82 @@ $('rec').onclick = async () => {
 };
 
 let clipBuf = null, clipN = 0, playing = false;
-const pbcv = document.getElementById('pbcv'), pbctx = pbcv.getContext('2d');
-const pbImg = pbctx.createImageData(96, 96);
 
+/* 画面只有两种状态，同一时刻只有一个来源在画：
+   preview  -> 预览轮询独占画布
+   playback -> 停止轮询，画布只显示片段（可拖动进度条逐帧看） */
+let mode = 'preview';
+
+function setMode(m) {
+  mode = m;
+  const live = (m === 'preview');
+  pvPaused = !live;                       /* 回放模式彻底停掉预览请求 */
+  abortPreviewInflight();                 /* 并让已发出的请求作废，防止闪帧 */
+  $('modeLive').classList.toggle('on', live);
+  $('modeClip').classList.toggle('on', !live);
+  $('pbBar').style.display = live ? 'none' : 'block';
+  $('pbTag').style.display = live ? 'none' : 'block';
+  if (live) {
+    $('pbTag').textContent = '';
+    /* 离开回放模式就释放片段缓冲（最大 675 KB）；再进回放会重新拉取 */
+    clipBuf = null; clipN = 0;
+    $('slider').max = 0; $('slider').value = 0;
+    $('pbInfo').textContent = '';
+  } else {
+    $('pbTag').textContent = '回放';
+    if (clipBuf) {
+      showClipFrame(Math.min(+$('slider').value || 0, clipN - 1));
+    } else {
+      $('pbInfo').textContent = '未加载片段';
+    }
+  }
+}
+
+/* 回放与预览共用同一个画布：不额外维护第二个 canvas / ImageData，
+   回放时暂停预览轮询，结束后预览自然接管，避免两套绘制互相覆盖。 */
 function showClipFrame(i) {
   if (!clipBuf) return;
-  drawGray(clipBuf.subarray(i * 9216, (i + 1) * 9216), pbctx, pbImg);
+  drawGray(clipBuf.subarray(i * 9216, (i + 1) * 9216), ctx, img);
 }
 
 async function playFromUrl(url) {
+  setMode('playback');      /* 先切模式：停掉预览轮询，让出 httpd 通道 */
   try {
     const r = await fetch(url, { cache: 'no-store' });
     if (!r.ok) return;
     const ab = await r.arrayBuffer();
     clipN = new DataView(ab).getUint16(0, true);
     clipBuf = new Uint8Array(ab, 8);
-    $('pb').style.display = 'block';
     $('slider').max = clipN - 1;
     $('pbInfo').textContent = clipN + ' 帧 / ' + (ab.byteLength/1024).toFixed(0) + ' KB';
-    playClip();
-  } catch (e) {}
+    await playClip();
+  } catch (e) {
+  }
 }
 
 async function loadClip() {
+  setMode('playback');
   try {
     const r = await fetch('/api/clip/last', { cache: 'no-store' });
     if (!r.ok) return;
     const ab = await r.arrayBuffer();
     clipN = new DataView(ab).getUint16(0, true);
     clipBuf = new Uint8Array(ab, 8);
-    $('pb').style.display = 'block';
     $('slider').max = clipN - 1;
     $('pbInfo').textContent = clipN + ' \u5e27 / ' + (ab.byteLength/1024).toFixed(0) + ' KB';
-    playClip();
-  } catch (e) {}
+    await playClip();
+  } catch (e) {
+  }
 }
 
 async function playClip() {
   if (!clipBuf || playing) return;
   playing = true;
+  const gen = pvGen;
   for (let i = 0; i < clipN; i++) {
+    /* 切到后台或切了模式就立即停：后台 timer 被节流到 1s，
+       继续跑会变成几十秒的"慢动作回放"，还会把预览一直锁住 */
+    if (hidden || gen !== pvGen) { playing = false; return; }
     showClipFrame(i);
     $('slider').value = i;
     await sleep(40);
@@ -341,7 +442,14 @@ async function playClip() {
   playing = false;
 }
 
-$('btnPlay').onclick = playClip;
+$('btnPlay').onclick = () => { if (clipBuf) playClip(); };
+
+$('modeLive').onclick = () => setMode('preview');
+$('modeClip').onclick = async () => {
+  if (clipBuf) { setMode('playback'); return; }
+  await loadClip();          /* 没有片段就先取最近一段 */
+  if (!clipBuf) setMode('playback');   /* 取不到也切过去，提示"未加载片段" */
+};
 $('slider').oninput = e => showClipFrame(+e.target.value);
 
 

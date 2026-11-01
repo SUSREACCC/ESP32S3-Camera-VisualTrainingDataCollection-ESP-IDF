@@ -74,7 +74,12 @@ void app_main(void)
         ESP_LOGW(TAG, "WiFi 暂未连上，后台重试中");
     }
 
-    ESP_ERROR_CHECK(web_ui_start());
+    /* HTTP 服务失败不应拖垮整机：只记日志并继续（相机/录制仍可用），
+       否则 max_open_sockets 之类的配置错误会让设备陷入重启循环 */
+    esp_err_t werr = web_ui_start();
+    if (werr != ESP_OK) {
+        ESP_LOGE(TAG, "HTTP 服务启动失败: %s（设备继续运行，但没有网页）", esp_err_to_name(werr));
+    }
     xTaskCreatePinnedToCore(pump_task, "pump", 6144, NULL, 4, NULL, 0);
 
     int n = 0;

@@ -178,7 +178,9 @@ esp_err_t rec_start(const rec_job_t *job)
     if (job->frames == 0 || job->frames > REC_MAX_FRAMES) return ESP_ERR_INVALID_ARG;
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    if (s_state != REC_IDLE) {
+    /* 只有"正在采集/正在落盘"时才算忙；REC_ERROR 允许直接重试，
+       否则一次瞬时写盘失败会让设备直到重启都无法再录制 */
+    if (s_state == REC_RECORDING || s_state == REC_WRITING) {
         xSemaphoreGive(s_lock);
         return ESP_ERR_INVALID_STATE;
     }
