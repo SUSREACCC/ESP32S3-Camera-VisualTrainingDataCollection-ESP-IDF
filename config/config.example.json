@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "types": [
+    "thumbs_up",
+    "fist",
+    "victory",
+    "palm",
+    "ok",
+    "wave",
+    "swipe_left",
+    "swipe_right",
+    "circle",
+    "none"
+  ],
+  "variables": [
+    {
+      "name": "light",
+      "max": 3,
+      "labels": {
+        "1": "warm",
+        "2": "cool",
+        "3": "backlit"
+      }
+    },
+    {
+      "name": "bg",
+      "max": 2,
+      "labels": {
+        "1": "plain",
+        "2": "cluttered"
+      }
+    },
+    {
+      "name": "dist",
+      "max": 3,
+      "labels": {
+        "1": "20cm",
+        "2": "35cm",
+        "3": "50cm"
+      }
+    },
+    {
+      "name": "angle",
+      "max": 5,
+      "labels": {
+        "1": "front",
+        "2": "plus15",
+        "3": "minus15",
+        "4": "plus30",
+        "5": "minus30"
+      }
+    }
+  ]
+}

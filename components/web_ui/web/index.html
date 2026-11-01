@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>视觉采集终端</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:10px; font:14px/1.5 -apple-system,system-ui,"Segoe UI",sans-serif;
+         background:#12151a; color:#e6e9ef; }
+  h1 { font-size:16px; margin:0 0 8px; font-weight:600; }
+  .card { background:#1b1f27; border:1px solid #2a303b; border-radius:10px; padding:10px; margin-bottom:10px; }
+  #stage { position:relative; width:100%; max-width:384px; margin:0 auto; }
+  #cv { width:100%; display:block; border-radius:8px; background:#000;
+        image-rendering:pixelated; image-rendering:crisp-edges; }
+  #overlay { position:absolute; inset:0; pointer-events:none; }
+  #overlay::before, #overlay::after { content:""; position:absolute; background:rgba(90,200,255,.35); }
+  #overlay::before { left:50%; top:8%; bottom:8%; width:1px; }
+  #overlay::after  { top:50%; left:8%; right:8%; height:1px; }
+  #safe { position:absolute; left:18%; top:18%; right:18%; bottom:18%;
+          border:1px dashed rgba(90,200,255,.45); border-radius:6px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+  .row > * { flex:1 1 30%; min-width:88px; }
+  label { display:block; font-size:11px; color:#8b95a7; margin-bottom:2px; }
+  select, input, button { width:100%; padding:8px; border-radius:7px; border:1px solid #333b48;
+         background:#232935; color:#e6e9ef; font-size:14px; }
+  button { cursor:pointer; font-weight:600; }
+  #rec { background:#c0392b; border-color:#c0392b; font-size:16px; padding:14px; }
+  #rec:disabled { background:#3a3f4a; border-color:#3a3f4a; color:#777; }
+  #bar { height:8px; background:#232935; border-radius:4px; overflow:hidden; margin-top:8px; }
+  #barIn { height:100%; width:0; background:#2ecc71; transition:width .1s linear; }
+  .stat { display:flex; justify-content:space-between; font-size:12px; color:#93a0b4; }
+  #counts { display:grid; grid-template-columns:repeat(auto-fill,minmax(80px,1fr)); gap:6px; }
+  #counts div { background:#232935; border-radius:6px; padding:4px 6px; font-size:11px; }
+  #counts b { display:block; font-size:14px; }
+  #pb { display:none; }
+  .hint { font-size:11px; color:#6b7789; margin-top:2px; }
+  #cfgBadge { font-family:ui-monospace,monospace; font-size:11px; color:#6b7789; }
+</style>
+</head>
+<body>
+
+<h1>视觉采集终端</h1>
+
+<div class="card">
+  <div id="stage">
+    <canvas id="cv" width="96" height="96"></canvas>
+    <div id="overlay"><div id="safe"></div></div>
+  </div>
+  <div class="stat" style="margin-top:8px">
+    <span id="stPreview">预览 —</span>
+    <span id="stWifi">WiFi —</span>
+  </div>
+</div>
+
+<div class="card">
+  <div class="row">
+    <div id="typeBox"><label>类别</label><select id="type"></select></div>
+  </div>
+  <div class="row" id="varsBox"></div>
+  <div class="row">
+    <div>
+      <label>每段帧数（本次采样）</label>
+      <select id="frames">
+        <option value="12">12 帧 · 0.48 s</option>
+        <option value="24">24 帧 · 0.96 s</option>
+        <option value="45">45 帧 · 1.80 s</option>
+        <option value="75" selected>75 帧 · 3.00 s</option>
+      </select>
+      <div class="hint" id="framesHint">≈ 675 KB/段</div>
+    </div>
+  </div>
+  <button id="rec">● 录制</button>
+  <div id="bar"><div id="barIn"></div></div>
+  <div class="stat" style="margin-top:6px"><span id="stRec">就绪</span><span id="stGroups">—</span></div>
+</div>
+
+<div class="card" id="pb">
+  <div class="stat"><span>回放</span><span id="pbInfo"></span></div>
+  <canvas id="pbcv" width="96" height="96" style="width:100%;max-width:384px;image-rendering:pixelated;display:block;margin:8px auto;border-radius:8px;background:#000"></canvas>
+  <input type="range" id="slider" min="0" max="0" value="0">
+  <button id="btnPlay" style="margin-top:8px">▶ 重播</button>
+</div>
+
+<div class="card">
+  <div class="stat" style="margin-bottom:6px">
+    <span>配额</span><span id="cfgBadge">cfg —</span>
+  </div>
+  <div id="counts"></div>
+</div>
+
+<div class="card">
+  <div class="stat" style="margin-bottom:6px">
+    <span>数据管理</span><span id="dmInfo">—</span>
+  </div>
+  <div class="row">
+    <div><label>筛选类别</label><select id="dmFilter"><option value="all">全部</option></select></div>
+    <div style="align-self:flex-end"><button id="dmRefresh">刷新</button></div>
+  </div>
+  <div id="dmList" style="max-height:300px;overflow:auto;border:1px solid #2a303b;border-radius:8px"></div>
+  <div class="row" style="margin-top:8px">
+    <div><button id="dmSelAll">全选本页</button></div>
+    <div><button id="dmDel" style="background:#8e2f22;border-color:#8e2f22">删除选中</button></div>
+    <div><button id="dmPrev">‹ 上一页</button></div>
+    <div><button id="dmNext">下一页 ›</button></div>
+  </div>
+</div>
+
+<script>
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const img = ctx.createImageData(96, 96);
+const $ = id => document.getElementById(id);
+
+let CFG = null;
+let previewOn = true, running = true, recording = false;
+let frames = 0, fpsWindow = [], fpsShown = 0;
+const PV_WORKERS = 2;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function lsKey(suffix) { return 'gesture.' + (CFG ? CFG.cfg_crc : 'nocfg') + '.' + suffix; }
+
+function drawGray(buf, tctx, timg) {
+  for (let i = 0, j = 0; i < 9216; i++, j += 4) {
+    const v = buf[i];
+    timg.data[j] = v; timg.data[j+1] = v; timg.data[j+2] = v; timg.data[j+3] = 255;
+  }
+  tctx.putImageData(timg, 0, 0);
+}
+
+async function loadConfig() {
+  CFG = await (await fetch('/api/config', { cache: 'no-store' })).json();
+  $('cfgBadge').textContent = 'cfg ' + CFG.cfg_crc;
+
+  const sel = $('type');
+  sel.innerHTML = '';
+  for (const t of CFG.types) {
+    const o = document.createElement('option');
+    o.value = t; o.textContent = t;
+    sel.appendChild(o);
+  }
+  const savedType = localStorage.getItem(lsKey('type'));
+  if (savedType && CFG.types.includes(savedType)) sel.value = savedType;
+
+  const box = $('varsBox');
+  box.innerHTML = '';
+  CFG.variables.forEach((v, idx) => {
+    const d = document.createElement('div');
+    const lab = document.createElement('label');
+    lab.textContent = v.name + (v.max ? ' (0-' + v.max + ')' : '');
+    const s = document.createElement('select');
+    s.id = 'var' + idx;
+    const o0 = document.createElement('option');
+    o0.value = '0'; o0.textContent = '\u2014';
+    s.appendChild(o0);
+    for (let code = 1; code <= v.max; code++) {
+      const lb = v.labels.find(x => x.code === code);
+      const o = document.createElement('option');
+      o.value = String(code);
+      o.textContent = lb ? (code + ' \u00b7 ' + lb.name) : String(code);
+      s.appendChild(o);
+    }
+    const hint = document.createElement('div');
+    hint.className = 'hint'; hint.id = 'varhint' + idx;
+    const showHint = () => {
+      const code = +s.value;
+      const lb = v.labels.find(x => x.code === code);
+      hint.textContent = code === 0 ? '未设置' : (lb ? (code + ' · ' + lb.name) : ('编码 ' + code));
+    };
+    const saved = localStorage.getItem(lsKey('var' + idx));
+    if (saved !== null && +saved <= v.max) s.value = saved;
+    s.onchange = () => { localStorage.setItem(lsKey('var' + idx), s.value); showHint(); };
+    showHint();
+    d.appendChild(lab); d.appendChild(s); d.appendChild(hint);
+    box.appendChild(d);
+  });
+
+  const savedF = localStorage.getItem(lsKey('frames'));
+  if (savedF) $('frames').value = savedF;
+  updateFramesHint();
+
+  const c = $('counts');
+  c.innerHTML = '';
+  for (const t of CFG.types) {
+    const d = document.createElement('div');
+    d.dataset.type = t;
+    d.dataset.type = t;
+    d.innerHTML = '<b>0</b>' + t;
+    c.appendChild(d);
+  }
+}
+
+function updateFramesHint() {
+  const n = +$('frames').value;
+  const bytes = 26 + 16 + 2 * n + n * 9216;
+  $('framesHint').textContent = '\u2248 ' + (bytes/1024).toFixed(0) + ' KB/\u6bb5';
+  if (CFG) localStorage.setItem(lsKey('frames'), String(n));
+}
+
+$('type').onchange = () => { if (CFG) localStorage.setItem(lsKey('type'), $('type').value); };
+$('frames').onchange = updateFramesHint;
+
+async function previewWorker() {
+  while (running) {
+    if (!previewOn) { await sleep(300); continue; }
+    const t0 = performance.now();
+    try {
+      const r = await fetch('/api/frame', { cache: 'no-store' });
+      if (r.status === 204) { previewOn = false; await sleep(300); continue; }
+      if (!r.ok) throw new Error(r.status);
+      const ab = await r.arrayBuffer();
+      if (ab.byteLength >= 8 + 9216) {
+        drawGray(new Uint8Array(ab, 8, 9216), ctx, img);
+        frames++;
+      }
+    } catch (e) { await sleep(400); }
+    const dt = performance.now() - t0;
+    await sleep(Math.max(0, 140 - dt));
+  }
+}
+
+setInterval(() => {
+  const now = performance.now();
+  fpsWindow.push([now, frames]);
+  while (fpsWindow.length && now - fpsWindow[0][0] > 2000) fpsWindow.shift();
+  if (fpsWindow.length > 1) {
+    const [t0, f0] = fpsWindow[0];
+    fpsShown = (frames - f0) * 1000 / (now - t0);
+  }
+  if (!recording) {
+    $('stPreview').textContent = previewOn
+      ? ('\u9884\u89c8 ' + fpsShown.toFixed(1) + ' fps')
+      : '\u91c7\u6837\u4e2d\uff0c\u56fe\u4f20\u5df2\u6682\u505c';
+  }
+}, 1000);
+
+async function statusLoop() {
+  while (running) {
+    try {
+      const s = await (await fetch('/api/status', { cache: 'no-store' })).json();
+      $('stWifi').textContent = s.wifi.connected
+        ? ('WiFi ' + s.wifi.ip + ' ' + s.wifi.rssi + 'dBm') : 'WiFi \u672a\u8fde\u63a5';
+      $('stGroups').textContent = '\u5171 ' + s.groups + ' \u7ec4';
+      if (!recording) previewOn = s.preview.on;
+
+      if (s.rec.state === 'recording') {
+        recording = true; previewOn = false;
+        $('stRec').textContent = '\u5f55\u5236\u4e2d ' + s.rec.got + '/' + s.rec.total;
+        $('barIn').style.width = (100 * s.rec.got / Math.max(1, s.rec.total)) + '%';
+        $('stPreview').textContent = '\u91c7\u6837\u4e2d\uff0c\u56fe\u4f20\u5df2\u6682\u505c';
+      } else if (recording) {
+        if (s.rec.state === 'writing') {
+          $('stRec').textContent = '\u843d\u76d8\u4e2d\u2026';
+        } else {
+          recording = false;
+          $('barIn').style.width = '100%';
+          $('stRec').textContent = s.rec.state === 'idle'
+            ? ('\u5df2\u4fdd\u5b58 ' + s.rec.last + ' (' + s.rec.last_frames + ' \u5e27)')
+            : '\u5f55\u5236\u5931\u8d25';
+          setTimeout(() => { $('barIn').style.width = '0'; }, 1200);
+          if (s.rec.state === 'idle') loadClip();
+          previewOn = true;
+        }
+      }
+    } catch (e) {}
+    await sleep(500);
+  }
+}
+
+$('rec').onclick = async () => {
+  const vars = CFG.variables.map((v, i) => {
+    const el = $('var' + i);
+    return el ? +el.value : 0;
+  });
+  const body = { label: $('type').value, frames: +$('frames').value, vars: vars };
+  $('rec').disabled = true;
+  previewOn = false;
+  try {
+    const r = await fetch('/api/record', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    if (r.status !== 202) {
+      const t = await r.text();
+      $('stRec').textContent = '\u88ab\u62d2\u7edd: ' + t;
+    } else { recording = true; $('stRec').textContent = '\u5f55\u5236\u4e2d\u2026'; }
+  } catch (e) { $('stRec').textContent = '\u7f51\u7edc\u9519\u8bef'; }
+  setTimeout(() => { $('rec').disabled = false; }, 400);
+};
+
+let clipBuf = null, clipN = 0, playing = false;
+const pbcv = document.getElementById('pbcv'), pbctx = pbcv.getContext('2d');
+const pbImg = pbctx.createImageData(96, 96);
+
+function showClipFrame(i) {
+  if (!clipBuf) return;
+  drawGray(clipBuf.subarray(i * 9216, (i + 1) * 9216), pbctx, pbImg);
+}
+
+async function playFromUrl(url) {
+  try {
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) return;
+    const ab = await r.arrayBuffer();
+    clipN = new DataView(ab).getUint16(0, true);
+    clipBuf = new Uint8Array(ab, 8);
+    $('pb').style.display = 'block';
+    $('slider').max = clipN - 1;
+    $('pbInfo').textContent = clipN + ' 帧 / ' + (ab.byteLength/1024).toFixed(0) + ' KB';
+    playClip();
+  } catch (e) {}
+}
+
+async function loadClip() {
+  try {
+    const r = await fetch('/api/clip/last', { cache: 'no-store' });
+    if (!r.ok) return;
+    const ab = await r.arrayBuffer();
+    clipN = new DataView(ab).getUint16(0, true);
+    clipBuf = new Uint8Array(ab, 8);
+    $('pb').style.display = 'block';
+    $('slider').max = clipN - 1;
+    $('pbInfo').textContent = clipN + ' \u5e27 / ' + (ab.byteLength/1024).toFixed(0) + ' KB';
+    playClip();
+  } catch (e) {}
+}
+
+async function playClip() {
+  if (!clipBuf || playing) return;
+  playing = true;
+  for (let i = 0; i < clipN; i++) {
+    showClipFrame(i);
+    $('slider').value = i;
+    await sleep(40);
+  }
+  playing = false;
+}
+
+$('btnPlay').onclick = playClip;
+$('slider').oninput = e => showClipFrame(+e.target.value);
+
+
+/* ---------------- 数据管理 ---------------- */
+var dmOffset = 0, dmLimit = 20, dmTotal = 0;
+var dmChecked = new Set();
+
+function fmtBytes(n) {
+  if (n >= 1048576) return (n/1048576).toFixed(1) + ' MB';
+  if (n >= 1024) return (n/1024).toFixed(0) + ' KB';
+  return n + ' B';
+}
+
+async function loadGroups() {
+  const label = $('dmFilter').value || 'all';
+  const url = '/api/groups?label=' + encodeURIComponent(label) + '&offset=' + dmOffset + '&limit=' + dmLimit;
+  var d;
+  try { d = await (await fetch(url, { cache: 'no-store' })).json(); }
+  catch (e) { $('dmInfo').textContent = '读取失败'; return; }
+
+  dmTotal = d.total;
+  const list = $('dmList');
+  list.innerHTML = '';
+  if (!d.groups.length) {
+    list.innerHTML = '<div style="padding:12px;color:#6b7789;font-size:12px">暂无数据</div>';
+  }
+  for (const g of d.groups) {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid #232935;font-size:12px';
+    const vars = (g.vars || []).join(',');
+    row.innerHTML =
+      '<input type="checkbox" data-name="' + g.name + '"' + (dmChecked.has(g.name) ? ' checked' : '') + ' style="width:auto;flex:0 0 18px">' +
+      '<span style="flex:1 1 auto;font-family:ui-monospace,monospace">' + g.name + '</span>' +
+      '<span style="flex:0 0 70px;color:#93a0b4">' + g.label + '</span>' +
+      '<span style="flex:0 0 70px;color:#6b7789">[' + vars + ']</span>' +
+      '<span style="flex:0 0 56px;color:#93a0b4">' + g.frames + '帧</span>' +
+      '<span style="flex:0 0 68px;color:#6b7789">' + fmtBytes(g.bytes) + '</span>' +
+      '<button data-play="' + g.name + '" style="width:auto;flex:0 0 44px;padding:4px 6px">▶</button>' +
+      '<button data-del="' + g.name + '" style="width:auto;flex:0 0 44px;padding:4px 6px;background:#8e2f22;border-color:#8e2f22">✕</button>';
+    list.appendChild(row);
+  }
+
+  list.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.onchange = () => {
+      if (cb.checked) dmChecked.add(cb.dataset.name); else dmChecked.delete(cb.dataset.name);
+      updateDmInfo();
+    };
+  });
+  list.querySelectorAll('button[data-play]').forEach(b => {
+    b.onclick = () => playFromUrl('/api/group?name=' + encodeURIComponent(b.dataset.play));
+  });
+  list.querySelectorAll('button[data-del]').forEach(b => {
+    b.onclick = () => doDelete([b.dataset.del]);
+  });
+
+  updateDmInfo();
+}
+
+function updateDmInfo() {
+  const pages = Math.max(1, Math.ceil(dmTotal / dmLimit));
+  const page = Math.floor(dmOffset / dmLimit) + 1;
+  $('dmInfo').textContent = '共 ' + dmTotal + ' 组 / 第 ' + page + '-' + pages + ' 页 / 勾选 ' + dmChecked.size;
+}
+
+async function doDelete(names) {
+  if (!names.length) { alert('请先勾选要删除的组'); return; }
+  if (!confirm('确认删除 ' + names.length + ' 组？' + String.fromCharCode(10) + names.slice(0,8).join(', ') + (names.length > 8 ? ' ...' : ''))) return;
+
+  try {
+    const r = await fetch('/api/group/delete', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ names: names })
+    });
+    if (r.status !== 202) { alert('删除被拒绝: ' + await r.text()); return; }
+  } catch (e) { alert('网络错误'); return; }
+
+  names.forEach(n => dmChecked.delete(n));
+  for (var i = 0; i < 100; i++) {
+    await sleep(150);
+    try {
+      const st = await (await fetch('/api/status', { cache: 'no-store' })).json();
+      if (st.del && st.del.busy) {
+        $('dmInfo').textContent = '删除中 ' + st.del.done + '/' + st.del.total + '...';
+        continue;
+      }
+      break;
+    } catch (e) {}
+  }
+  await loadGroups();
+  refreshStats();
+}
+
+async function refreshStats() {
+  try {
+    const d = await (await fetch('/api/stats', { cache: 'no-store' })).json();
+    $('counts').querySelectorAll('div[data-type]').forEach(el => {
+      const st = d.stats.find(x => x.label === el.dataset.type);
+      el.innerHTML = '<b>' + (st ? st.count : 0) + '</b>' + el.dataset.type;
+    });
+  } catch (e) {}
+}
+
+function fillDmFilter() {
+  const sel = $('dmFilter');
+  sel.innerHTML = '<option value="all">全部</option>';
+  for (const t of CFG.types) {
+    const o = document.createElement('option');
+    o.value = t; o.textContent = t;
+    sel.appendChild(o);
+  }
+  sel.onchange = () => { dmOffset = 0; dmChecked.clear(); loadGroups(); };
+}
+
+$('dmRefresh').onclick = () => { dmOffset = 0; loadGroups(); refreshStats(); };
+$('dmPrev').onclick = () => { if (dmOffset >= dmLimit) { dmOffset -= dmLimit; loadGroups(); } };
+$('dmNext').onclick = () => { if (dmOffset + dmLimit < dmTotal) { dmOffset += dmLimit; loadGroups(); } };
+$('dmSelAll').onclick = () => {
+  const boxes = $('dmList').querySelectorAll('input[type=checkbox]');
+  const allOn = [...boxes].every(b => b.checked) && boxes.length > 0;
+  boxes.forEach(b => { b.checked = !allOn; if (allOn) dmChecked.delete(b.dataset.name); else dmChecked.add(b.dataset.name); });
+  updateDmInfo();
+};
+$('dmDel').onclick = () => doDelete([...dmChecked]);
+
+(async () => {
+  // 设备重启期间可能取不到配置：重试而不是让整页卡死
+  for (var attempt = 0; attempt < 20 && !CFG; attempt++) {
+    try { await loadConfig(); }
+    catch (e) { await sleep(500); }
+  }
+  if (!CFG) {
+    $('stRec').textContent = '配置加载失败，请刷新';
+    return;
+  }
+  $('frames').onchange();
+  fillDmFilter();
+  loadGroups();
+  refreshStats();
+  statusLoop();
+  for (let i = 0; i < PV_WORKERS; i++) previewWorker();
+})();
+</script>
+</body>
+</html>

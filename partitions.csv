@@ -1,0 +1,11 @@
+# ESP32-S3 相机板 16MB Flash 分区表
+# 说明：
+#   - app 分区 4MB：容纳 esp32-camera + esp-tflite-micro + esp-nn + 量化模型
+#     （默认的 singleapp 只有 1MB，接入相机与 TFLM 后会超出）
+#   - 其余约 11.9MB 暂留空闲，后续如需模型分区/文件分区可在此追加
+#   - 修改本文件后需 `idf.py erase-flash` 或至少整片烧写，否则旧分区表残留
+#
+# Name,     Type, SubType,  Offset,   Size,  Flags
+nvs,        data, nvs,      0x9000,   0x6000,
+phy_init,   data, phy,      0xf000,   0x1000,
+factory,    app,  factory,  0x10000,  4M,

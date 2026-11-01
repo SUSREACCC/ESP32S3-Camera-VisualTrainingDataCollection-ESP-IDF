@@ -1,0 +1,61 @@
+# ============================================================
+#  ESP-CAM 数据采集终端 · .gitignore
+# ============================================================
+
+# ---------- 构建产物 ----------
+# 一次完整构建约 160 MB，绝对不能入库
+build/
+*.bin
+*.elf
+*.map
+*.obj
+*.o
+*.d
+*.a
+
+# ---------- 由 sdkconfig.defaults 生成的配置 ----------
+# sdkconfig 是本地生成的，真正的"源"是 sdkconfig.defaults
+# 注意：改了 sdkconfig.defaults 后，要让改动生效必须删掉 sdkconfig 重新构建
+sdkconfig
+sdkconfig.old
+
+# ---------- 组件管理器 ----------
+# 本项目把 esp32-camera / esp_jpeg 直接 vendor 在 components/ 里，
+# 不依赖组件管理器下载，所以 managed_components 与 lock 都不入库。
+# dependencies.lock 里还含有本机绝对路径（D:\WorkSpace\...），换台机器就失效。
+managed_components/
+dependencies.lock
+
+# ---------- 凭据（重要） ----------
+# 真实热点密码只存在于本地，仓库里只提交 .example 模板
+main/wifi_credentials.h
+
+# ---------- IDF 本地工具链 shim ----------
+.idf-bin/
+
+# ---------- PC 侧运行产物 ----------
+# fetch_dataset.py 的默认输出、gseq_dump.py 导出的帧、串口日志
+dataset/
+_test_ds/
+*.gseq
+*.pgm
+*.log
+serial_*.log
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ---------- 编辑器 ----------
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*~
+
+# ---------- 操作系统 ----------
+Thumbs.db
+desktop.ini
+.DS_Store

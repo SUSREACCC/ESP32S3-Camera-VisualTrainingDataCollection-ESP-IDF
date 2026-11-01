@@ -1,0 +1,58 @@
+# ============================================================
+#  ESP-CAM 数据采集终端 · 默认配置
+#  这些是"少了就工作不了"的项；其余保持 IDF 默认即可
+# ============================================================
+
+# ---- 目标 ----
+CONFIG_IDF_TARGET="esp32s3"
+
+# ---- Flash：N16R8 模组 = 16 MB QIO ----
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+
+# ---- PSRAM：8 MB Octal @80 MHz（相机帧缓冲必须放这里）----
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# ---- CPU ----
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# ---- 分区表（app 4 MB，给 WiFi + httpd + 录制器留余量）----
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# ---- FATFS：长文件名 + 缓冲放内部 RAM ----
+#  SDMMC 在 S3 上不能对 PSRAM 做 DMA，FATFS 缓冲必须在内部 RAM
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_ALLOC_PREFER_EXTRAM=n
+
+# ---- 相机 ----
+#
+# SCCB 时钟：esp32-camera 的 Kconfig 里写死了 `range 100000 400000`，
+# 所以**低于 100 kHz 的值会被静默忽略**（下次构建自动改回 100000）。
+# 不要试图在这里写 10000 —— 它不会生效。
+# 实测的 SCCB NACK 根因是"传感器出流后再写寄存器"，正确对策是不要那样做，
+# 而不是降频。详见 docs/04-踩坑与设计决策.md 第 1 条。
+CONFIG_SCCB_CLK_FREQ=100000
+CONFIG_SCCB_HARDWARE_I2C_DRIVER_NEW=y
+#
+# 灰度输出依赖 PSRAM DMA：OV2640 没有真灰度模式，驱动把 GRAYSCALE 映射到
+# YUV422 寄存器，只有 psram_mode 为真时才会把 2B/px 压成 1B/px。
+# 关掉它 → 帧数据错位。必须为 y。
+CONFIG_CAMERA_PSRAM_DMA=y
+
+# ---- 网络 ----
+#
+# HTTP 请求头缓冲：默认只有 512 B，手机浏览器（User-Agent + sec-ch-ua + cookies）
+# 随手就超过，表现为 **HTTP 431 "Header fields are too long"**、页面打不开。
+# 该缓冲在"每次请求"的 aux 结构里，不是常驻，加大几乎无代价。
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=4096
+CONFIG_HTTPD_MAX_URI_LEN=1024
+#
+
+# 回环：允许无 WiFi 时用 127.0.0.1 自检 HTTP 服务
+CONFIG_LWIP_NETIF_LOOPBACK=y
+# 仅当需要 WebSocket 时才打开（本工具用 HTTP 轮询，故关闭）
+# CONFIG_HTTPD_WS_SUPPORT is not set
