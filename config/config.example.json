@@ -1,15 +1,11 @@
 {
   "version": 1,
   "types": [
-    "thumbs_up",
+    "palm",
     "fist",
     "victory",
-    "palm",
-    "ok",
+    "beckon",
     "wave",
-    "swipe_left",
-    "swipe_right",
-    "circle",
     "none"
   ],
   "variables": [

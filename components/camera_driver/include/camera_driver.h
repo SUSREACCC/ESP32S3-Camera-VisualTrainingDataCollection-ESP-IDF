@@ -15,10 +15,14 @@ extern "C" {
 #define CAM_GRAY_H      96
 #define CAM_GRAY_SIZE   (CAM_GRAY_W * CAM_GRAY_H)   /* 9216 B */
 
-/* ---------- 时域窗口：6 帧 @15fps ≈ 400 ms ---------- */
-#define CAM_WIN_FRAMES  6
-#define CAM_WIN_SIZE    (CAM_WIN_FRAMES * CAM_GRAY_SIZE)   /* 55296 B */
-#define CAM_WIN_FPS     15
+/* ---------- 时域窗口：10 帧 @25fps = 400 ms ----------
+ * 注意：主流程（录制/网页）已改用 rec_pump_frame 连续取帧，训练侧在 PC 上滑窗，
+ * 本组常量与其 API 目前未被使用，保留是为了将来做设备端实时推理。
+ * 数值必须与训练侧一致：25 fps 原生帧率、10 帧窗口。
+ * 调用方需自备 CAM_WIN_SIZE 字节缓冲（92160 B，建议放 PSRAM）。 */
+#define CAM_WIN_FRAMES  10
+#define CAM_WIN_SIZE    (CAM_WIN_FRAMES * CAM_GRAY_SIZE)   /* 92160 B */
+#define CAM_WIN_FPS     25
 
 /* ---------- 引脚（见 docs/硬件接线原理图.md §4.1） ---------- */
 #define CAM_PIN_PWDN    (-1)

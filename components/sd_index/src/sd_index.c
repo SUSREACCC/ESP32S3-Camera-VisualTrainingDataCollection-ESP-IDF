@@ -11,8 +11,9 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 
-#include "sd_index.h"
 #include "cfg_store.h"
+
+#include "sd_index.h"
 
 static const char *TAG = "SDIDX";
 
@@ -301,9 +302,12 @@ esp_err_t sd_index_rewrite(void)
         return ESP_FAIL;
     }
 
-    fprintf(f, "# esp32cam dataset index v1\n");
+    char crchex[16];
+    cfg_crc_hex(crchex, sizeof(crchex));
+    fprintf(f, "# esp32cam dataset index v3\n");
     fprintf(f, "# next_id=%u\n", (unsigned)s_next_id);
-    fprintf(f, "# name|subject|label|light|bg|dist|angle|hand|frames|bytes|mtime|flags\n");
+    fprintf(f, "# cfg_crc=%s\n", crchex);
+    fprintf(f, "# name|label|v0|v1|v2|v3|frames|bytes|mtime|flags\n");
 
     char line[192];
     for (int i = 0; i < s_count; i++) {

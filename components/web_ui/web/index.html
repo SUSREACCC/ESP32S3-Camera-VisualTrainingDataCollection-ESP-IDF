@@ -20,6 +20,11 @@
   #overlay::after  { top:50%; left:8%; right:8%; height:1px; }
   #safe { position:absolute; left:18%; top:18%; right:18%; bottom:18%;
           border:1px dashed rgba(90,200,255,.45); border-radius:6px; }
+  /* 40% 参考框：手高须超出它；动态位移须至少跨过它的边长 */
+  #box40 { position:absolute; left:30%; top:30%; width:40%; height:40%;
+           border:1px dashed rgba(230,126,34,.8); border-radius:4px; }
+  #box40::after { content:"40%"; position:absolute; right:-2px; top:-13px;
+           font-size:9px; color:rgba(230,126,34,.95); letter-spacing:.5px; }
   .row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
   .row > * { flex:1 1 30%; min-width:88px; }
   label { display:block; font-size:11px; color:#8b95a7; margin-bottom:2px; }
@@ -46,7 +51,7 @@
 <div class="card">
   <div id="stage">
     <canvas id="cv" width="96" height="96"></canvas>
-    <div id="overlay"><div id="safe"></div></div>
+    <div id="overlay"><div id="safe"></div><div id="box40"></div></div>
   </div>
   <div class="stat" style="margin-top:8px">
     <span id="stPreview">预览 —</span>
